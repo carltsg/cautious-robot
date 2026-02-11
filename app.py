@@ -82,10 +82,17 @@ def admin_required(f):
         if 'user' not in session:
             return redirect(url_for('login'))
         user_email = session['user']['email']
-        # Clean up admin emails and compare
-        admin_list = [email.strip() for email in ADMIN_EMAILS]
-        if user_email not in admin_list:
-            return 'Unauthorized - Admin access required', 403
+        # Clean up admin emails and compare (case-insensitive)
+        admin_list = [email.strip().lower() for email in ADMIN_EMAILS]
+
+        # Debug logging
+        print(f"DEBUG - Admin check:")
+        print(f"  Logged in as: '{user_email}' (lowercase: '{user_email.lower()}')")
+        print(f"  Admin list: {admin_list}")
+        print(f"  Match: {user_email.lower() in admin_list}")
+
+        if user_email.lower() not in admin_list:
+            return f'Unauthorized - Admin access required<br><br>Your email: <code>{user_email}</code><br>Admin emails: <code>{admin_list}</code><br><br>Update ADMIN_EMAILS in .env file and restart the app.', 403
         return f(*args, **kwargs)
     return decorated_function
 
