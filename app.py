@@ -177,21 +177,35 @@ def view_report(report_id):
             return f'Error fetching report: {report_response.text}', 500
 
         report = report_response.json()
+        dataset_id = report['datasetId']
 
-        # Get user's RLS roles
-        user_email = session['user']['email']
-        roles = get_user_roles(user_email, report['datasetId'])
+        # Check if dataset has RLS roles defined
+        roles_response = requests.get(
+            f'https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE_ID}/datasets/{dataset_id}/roles',
+            headers=headers
+        )
 
-        # Generate embed token with RLS
+        dataset_has_rls = False
+        if roles_response.status_code == 200:
+            dataset_roles = roles_response.json().get('value', [])
+            dataset_has_rls = len(dataset_roles) > 0
+
+        # Build embed token payload
         embed_payload = {
-            'datasets': [{'id': report['datasetId']}],
-            'reports': [{'id': report_id}],
-            'identities': [{
+            'datasets': [{'id': dataset_id}],
+            'reports': [{'id': report_id}]
+        }
+
+        # Only include identities if dataset has RLS roles defined
+        if dataset_has_rls:
+            user_email = session['user']['email']
+            roles = get_user_roles(user_email, dataset_id)
+
+            embed_payload['identities'] = [{
                 'username': user_email,
                 'roles': roles,
-                'datasets': [report['datasetId']]
+                'datasets': [dataset_id]
             }]
-        }
 
         token_response = requests.post(
             'https://api.powerbi.com/v1.0/myorg/GenerateToken',
@@ -210,7 +224,8 @@ def view_report(report_id):
                              embed_url=report['embedUrl'],
                              embed_token=embed_token,
                              user=session['user'],
-                             admin_emails=ADMIN_EMAILS)
+                             admin_emails=ADMIN_EMAILS,
+                             rls_enabled=dataset_has_rls)
     except Exception as e:
         return f'Error: {str(e)}', 500
 

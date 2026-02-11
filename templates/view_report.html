@@ -6,10 +6,17 @@
 
 <h1 class="mb-3">{{ report_name }}</h1>
 
+{% if rls_enabled %}
 <div class="alert alert-info">
     <strong>Row-Level Security Active:</strong> You are viewing this report as {{ user.email }}.
     The data you see is filtered based on your assigned RLS roles.
 </div>
+{% else %}
+<div class="alert alert-warning">
+    <strong>Note:</strong> This dataset does not have RLS (Row-Level Security) roles defined.
+    All users will see the same data. To enable RLS filtering, create roles in Power BI Desktop and republish the report.
+</div>
+{% endif %}
 
 <div id="embedContainer"></div>
 
