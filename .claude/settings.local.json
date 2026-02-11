@@ -8,7 +8,11 @@
       "Bash(git commit:*)",
       "Bash(git remote add:*)",
       "Bash(git push:*)",
-      "Bash(git branch:*)"
+      "Bash(git branch:*)",
+      "Bash(if [ -f .env ])",
+      "Bash(then grep \"ADMIN_EMAILS\" .env)",
+      "Bash(else echo \".env file not found\")",
+      "Bash(fi)"
     ]
   }
 }

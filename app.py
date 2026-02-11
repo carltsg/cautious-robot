@@ -66,6 +66,14 @@ def get_user_roles(user_email, dataset_id):
     # Default: assign 'Customer' role for automatic email-based RLS filtering
     return ['Customer']
 
+def is_admin():
+    """Check if current user is an admin"""
+    if 'user' not in session:
+        return False
+    user_email = session['user']['email']
+    admin_list = [email.strip().lower() for email in ADMIN_EMAILS]
+    return user_email.lower() in admin_list
+
 def login_required(f):
     """Decorator to require login"""
     @wraps(f)
@@ -100,7 +108,7 @@ def admin_required(f):
 @app.route('/')
 @login_required
 def index():
-    return render_template('index.html', user=session['user'], admin_emails=ADMIN_EMAILS)
+    return render_template('index.html', user=session['user'], is_admin=is_admin())
 
 @app.route('/login')
 def login():
@@ -160,7 +168,7 @@ def reports():
 
         if response.status_code == 200:
             reports = response.json().get('value', [])
-            return render_template('reports.html', reports=reports, user=session['user'], admin_emails=ADMIN_EMAILS)
+            return render_template('reports.html', reports=reports, user=session['user'], is_admin=is_admin())
         else:
             return f'Error fetching reports: {response.text}', 500
     except Exception as e:
@@ -231,7 +239,7 @@ def view_report(report_id):
                              embed_url=report['embedUrl'],
                              embed_token=embed_token,
                              user=session['user'],
-                             admin_emails=ADMIN_EMAILS,
+                             is_admin=is_admin(),
                              rls_enabled=dataset_has_rls)
     except Exception as e:
         return f'Error: {str(e)}', 500
@@ -278,7 +286,7 @@ def admin():
                              reports=reports,
                              dataset_roles=dataset_roles,
                              user=session['user'],
-                             admin_emails=ADMIN_EMAILS)
+                             is_admin=is_admin())
     except Exception as e:
         return f'Error: {str(e)}', 500
 
