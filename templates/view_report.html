@@ -20,13 +20,36 @@
 
 <div id="embedContainer"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/powerbi-client@2.23.0/dist/powerbi.min.js"></script>
+<!-- Debug info (remove in production) -->
+<div class="mt-3">
+    <details>
+        <summary class="text-muted" style="cursor: pointer;">Debug Information</summary>
+        <div class="card mt-2">
+            <div class="card-body">
+                <p><strong>Report ID:</strong> <code>{{ report_id }}</code></p>
+                <p><strong>Embed URL:</strong> <code>{{ embed_url }}</code></p>
+                <p><strong>Token Length:</strong> <code>{{ embed_token|length }} characters</code></p>
+                <p><strong>User:</strong> <code>{{ user.email }}</code></p>
+                <p><strong>RLS Enabled:</strong> <code>{{ rls_enabled }}</code></p>
+                <hr>
+                <p class="mb-0"><small>Check browser console (F12) for detailed logs</small></p>
+            </div>
+        </div>
+    </details>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/powerbi-client@2.23.0/dist/powerbi.min.js"
+        onerror="console.error('Failed to load Power BI client library from CDN')"></script>
 <script src="{{ url_for('static', filename='powerbi.js') }}"></script>
 <script>
-    embedReport(
-        '{{ report_id }}',
-        '{{ embed_url }}',
-        '{{ embed_token }}'
-    );
+    // Wait for page to fully load
+    window.addEventListener('load', function() {
+        console.log('Page loaded, starting embed...');
+        embedReport(
+            '{{ report_id }}',
+            '{{ embed_url }}',
+            '{{ embed_token }}'
+        );
+    });
 </script>
 {% endblock %}

@@ -5,20 +5,36 @@
  * @param {string} accessToken - The embed token with RLS
  */
 function embedReport(reportId, embedUrl, accessToken) {
+    console.log('Starting Power BI embed...');
+    console.log('Report ID:', reportId);
+    console.log('Embed URL:', embedUrl);
+    console.log('Token length:', accessToken ? accessToken.length : 0);
+
     const embedContainer = document.getElementById('embedContainer');
 
     if (!embedContainer) {
         console.error('Embed container not found');
+        showError('Embed container not found on page');
         return;
     }
 
-    // Power BI embed configuration
+    // Check if Power BI library loaded
+    if (typeof powerbi === 'undefined') {
+        console.error('Power BI JavaScript library not loaded');
+        showError('Power BI library failed to load. Check your internet connection.');
+        return;
+    }
+
+    console.log('Power BI library loaded successfully');
+    console.log('Available on powerbi object:', Object.keys(powerbi));
+
+    // Power BI embed configuration - simplified without models
     const config = {
         type: 'report',
         id: reportId,
         embedUrl: embedUrl,
         accessToken: accessToken,
-        permissions: models.Permissions.Read,
+        tokenType: 1, // Embed token
         settings: {
             filterPaneEnabled: true,
             navContentPaneEnabled: true,
@@ -30,13 +46,19 @@ function embedReport(reportId, embedUrl, accessToken) {
                 pageNavigation: {
                     visible: true
                 }
-            },
-            background: models.BackgroundType.Transparent
+            }
         }
     };
 
-    // Embed the report
-    const report = powerbi.embed(embedContainer, config);
+    console.log('Embed config:', config);
+
+    // Show loading indicator
+    embedContainer.innerHTML = '<div style="padding: 40px; text-align: center;"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div><p class="mt-3">Loading report...</p></div>';
+
+    try {
+        // Embed the report
+        const report = powerbi.embed(embedContainer, config);
+        console.log('Embed initiated successfully');
 
     // Event handlers
     report.on('loaded', function() {
@@ -62,4 +84,27 @@ function embedReport(reportId, embedUrl, accessToken) {
     report.on('pageChanged', function(event) {
         console.log('Page changed:', event.detail.newPage.displayName);
     });
+    } catch (error) {
+        console.error('Exception during embed:', error);
+        showError('Failed to embed report: ' + error.message);
+    }
+}
+
+/**
+ * Show error message on page
+ */
+function showError(message) {
+    const embedContainer = document.getElementById('embedContainer');
+    if (embedContainer) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'alert alert-danger';
+        errorDiv.innerHTML = `
+            <h4 class="alert-heading">Error Loading Report</h4>
+            <p>${message}</p>
+            <hr>
+            <p class="mb-0">Check the browser console (F12) for more details.</p>
+        `;
+        embedContainer.innerHTML = '';
+        embedContainer.appendChild(errorDiv);
+    }
 }
