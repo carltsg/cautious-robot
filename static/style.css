@@ -1,0 +1,62 @@
+/* Power BI Embed Container */
+#embedContainer {
+    height: 600px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    opacity: 0.95;
+    transition: opacity 0.3s ease;
+}
+
+#embedContainer iframe {
+    border: none;
+    border-radius: 4px;
+}
+
+/* Card Styling */
+.card {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* Navigation */
+.navbar-brand {
+    font-weight: bold;
+}
+
+/* Table Improvements */
+.table-responsive {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+/* Form Improvements */
+select[multiple] {
+    height: auto !important;
+}
+
+/* Badge Spacing */
+.badge {
+    margin-right: 4px;
+}
+
+/* Alert Improvements */
+.alert {
+    border-radius: 4px;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    #embedContainer {
+        height: 400px;
+    }
+
+    .card {
+        margin-bottom: 1rem;
+    }
+}

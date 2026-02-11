@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="mb-3">
+    <a href="/reports" class="btn btn-secondary">&larr; Back to Reports</a>
+</div>
+
+<h1 class="mb-3">{{ report_name }}</h1>
+
+<div class="alert alert-info">
+    <strong>Row-Level Security Active:</strong> You are viewing this report as {{ user.email }}.
+    The data you see is filtered based on your assigned RLS roles.
+</div>
+
+<div id="embedContainer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/powerbi-client@2.23.0/dist/powerbi.min.js"></script>
+<script src="{{ url_for('static', filename='powerbi.js') }}"></script>
+<script>
+    embedReport(
+        '{{ report_id }}',
+        '{{ embed_url }}',
+        '{{ embed_token }}'
+    );
+</script>
+{% endblock %}

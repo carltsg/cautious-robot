@@ -1,0 +1,198 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1 class="mb-4">RLS Configuration Admin Panel</h1>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Add User Mapping</h5>
+            </div>
+            <div class="card-body">
+                <form id="mappingForm">
+                    <div class="mb-3">
+                        <label for="userEmail" class="form-label">User Email:</label>
+                        <input type="email" id="userEmail" class="form-control" required
+                               placeholder="user@domain.com">
+                    </div>
+                    <div class="mb-3">
+                        <label for="datasetId" class="form-label">Report/Dataset:</label>
+                        <select id="datasetId" class="form-control" required>
+                            <option value="">-- Select a report --</option>
+                            {% for report in reports %}
+                            <option value="{{ report.datasetId }}" data-report-name="{{ report.name }}">
+                                {{ report.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="roles" class="form-label">RLS Roles (hold Ctrl/Cmd to select multiple):</label>
+                        <select id="roles" class="form-control" multiple size="5">
+                            <option value="" disabled>Select a report first</option>
+                        </select>
+                        <small class="form-text text-muted">
+                            These are the RLS roles defined in the Power BI dataset.
+                        </small>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Mapping</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">Instructions</h5>
+            </div>
+            <div class="card-body">
+                <h6>How to configure RLS:</h6>
+                <ol>
+                    <li>Enter the user's email address</li>
+                    <li>Select the report/dataset</li>
+                    <li>Select one or more RLS roles for the user</li>
+                    <li>Click "Save Mapping"</li>
+                </ol>
+                <hr>
+                <h6>Important:</h6>
+                <ul class="small">
+                    <li>RLS roles must be defined in your Power BI Desktop file first</li>
+                    <li>Users without mappings will see no data (secure by default)</li>
+                    <li>Multiple roles can be assigned to a single user</li>
+                    <li>Changes take effect immediately</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0">Current Mappings</h5>
+    </div>
+    <div class="card-body">
+        {% if mappings %}
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>User Email</th>
+                        <th>Roles</th>
+                        <th>Dataset ID</th>
+                        <th>Created</th>
+                        <th>Created By</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for mapping in mappings %}
+                    <tr>
+                        <td>{{ mapping.userEmail }}</td>
+                        <td>
+                            {% for role in mapping.roles %}
+                            <span class="badge bg-primary">{{ role }}</span>
+                            {% endfor %}
+                        </td>
+                        <td><small class="text-muted">{{ mapping.datasetId[:20] }}...</small></td>
+                        <td><small>{{ mapping.createdAt[:10] }}</small></td>
+                        <td><small>{{ mapping.createdBy }}</small></td>
+                        <td>
+                            <button onclick="deleteMapping('{{ mapping.userEmail }}', '{{ mapping.datasetId }}')"
+                                    class="btn btn-sm btn-danger">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-warning">
+            No RLS mappings configured yet. Add your first mapping using the form above.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    const datasetRoles = {{ dataset_roles|tojson }};
+
+    // Update roles dropdown when dataset is selected
+    document.getElementById('datasetId').addEventListener('change', function() {
+        const datasetId = this.value;
+        const roles = datasetRoles[datasetId] || [];
+        const select = document.getElementById('roles');
+
+        if (roles.length > 0) {
+            select.innerHTML = roles.map(r => `<option value="${r}">${r}</option>`).join('');
+        } else {
+            select.innerHTML = '<option value="" disabled>No RLS roles defined for this dataset</option>';
+        }
+    });
+
+    // Handle form submission
+    document.getElementById('mappingForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const userEmail = document.getElementById('userEmail').value;
+        const datasetId = document.getElementById('datasetId').value;
+        const selectedOptions = Array.from(document.getElementById('roles').selectedOptions);
+        const roles = selectedOptions.map(o => o.value);
+
+        if (roles.length === 0) {
+            alert('Please select at least one role');
+            return;
+        }
+
+        try {
+            const response = await fetch('/admin/save_mapping', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    userEmail: userEmail,
+                    datasetId: datasetId,
+                    roles: roles
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert('Mapping saved successfully!');
+                location.reload();
+            } else {
+                alert('Error saving mapping: ' + result.error);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    });
+
+    // Handle delete mapping
+    async function deleteMapping(email, datasetId) {
+        if (confirm(`Delete RLS mapping for ${email}?`)) {
+            try {
+                const response = await fetch('/admin/delete_mapping', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        userEmail: email,
+                        datasetId: datasetId
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('Mapping deleted successfully!');
+                    location.reload();
+                } else {
+                    alert('Error deleting mapping: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+    }
+</script>
+{% endblock %}

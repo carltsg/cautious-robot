@@ -1,0 +1,35 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1 class="mb-4">Available Power BI Reports</h1>
+
+{% if reports %}
+<div class="row">
+    {% for report in reports %}
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">{{ report.name }}</h5>
+                <p class="card-text text-muted small">Report ID: {{ report.id }}</p>
+                <p class="card-text text-muted small">Dataset ID: {{ report.datasetId }}</p>
+            </div>
+            <div class="card-footer bg-white">
+                <a href="/report/{{ report.id }}" class="btn btn-primary w-100">View Report</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">
+    <h4 class="alert-heading">No reports found</h4>
+    <p>There are no reports available in the configured Power BI workspace.</p>
+    <hr>
+    <p class="mb-0">Please check that:</p>
+    <ul>
+        <li>The WORKSPACE_ID in your .env file is correct</li>
+        <li>The service principal has access to the workspace</li>
+        <li>There are reports published to the workspace</li>
+    </ul>
+</div>
+{% endif %}
+{% endblock %}

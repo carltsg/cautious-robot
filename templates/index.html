@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card mt-5">
+            <div class="card-body text-center">
+                <h1 class="card-title">Welcome, {{ user.name }}!</h1>
+                <p class="card-text text-muted">You are logged in as <strong>{{ user.email }}</strong></p>
+                <hr>
+                <p class="mt-4">This is a Power BI Embedded proof of concept with row-level security (RLS).</p>
+                <div class="mt-4">
+                    <a href="/reports" class="btn btn-primary btn-lg">View Reports</a>
+                </div>
+                {% if user.email in admin_emails %}
+                <div class="mt-3">
+                    <a href="/admin" class="btn btn-secondary">Admin Panel</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
