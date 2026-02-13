@@ -8,6 +8,13 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'README.md'
+      - 'TECHNICAL_DOCUMENTATION.md'
+      - 'RLS_FLOW_EXPLAINED.md'
   workflow_dispatch:
 
 jobs:
