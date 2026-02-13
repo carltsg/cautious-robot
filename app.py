@@ -352,7 +352,7 @@ def view_report(report_id):
 @app.route('/admin')
 @admin_required
 def admin():
-    """Admin panel for RLS configuration"""
+    """Admin panel for report access configuration"""
     try:
         # Get all reports
         token = get_powerbi_token()
@@ -368,86 +368,16 @@ def admin():
 
         reports = reports_response.json().get('value', [])
 
-        # Get RLS roles for each dataset
-        dataset_roles = {}
-        for report in reports:
-            dataset_id = report['datasetId']
-            if dataset_id not in dataset_roles:
-                roles_response = requests.get(
-                    f'https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE_ID}/datasets/{dataset_id}/roles',
-                    headers=headers
-                )
-                if roles_response.status_code == 200:
-                    roles = roles_response.json().get('value', [])
-                    dataset_roles[dataset_id] = [r['name'] for r in roles]
-                else:
-                    dataset_roles[dataset_id] = []
-
-        # Load current mappings
-        rls_mappings = load_rls_config()
+        # Load report access mappings
         report_access_mappings = load_reports_access_config()
 
         return render_template('admin.html',
-                             rls_mappings=rls_mappings,
-                             report_access_mappings=report_access_mappings,
                              reports=reports,
-                             dataset_roles=dataset_roles,
+                             report_access_mappings=report_access_mappings,
                              user=session['user'],
                              is_admin=is_admin())
     except Exception as e:
         return f'Error: {str(e)}', 500
-
-@app.route('/admin/save_mapping', methods=['POST'])
-@admin_required
-def save_mapping():
-    """Save user-to-role mapping"""
-    try:
-        data = request.json
-        mappings = load_rls_config()
-
-        # Remove existing mapping for this user and dataset
-        mappings = [m for m in mappings if not (
-            m['userEmail'].lower() == data['userEmail'].lower() and
-            m.get('datasetId') == data['datasetId']
-        )]
-
-        # Add new mapping
-        new_mapping = {
-            'userEmail': data['userEmail'],
-            'roles': data['roles'],
-            'datasetId': data['datasetId'],
-            'createdAt': datetime.utcnow().isoformat(),
-            'createdBy': session['user']['email']
-        }
-        mappings.append(new_mapping)
-
-        save_rls_config(mappings)
-        return jsonify({'success': True, 'message': 'Mapping saved successfully'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/admin/delete_mapping', methods=['POST'])
-@admin_required
-def delete_mapping():
-    """Delete user-to-role mapping"""
-    try:
-        user_email = request.json['userEmail']
-        dataset_id = request.json.get('datasetId')
-        mappings = load_rls_config()
-
-        # Remove matching mappings
-        if dataset_id:
-            mappings = [m for m in mappings if not (
-                m['userEmail'].lower() == user_email.lower() and
-                m.get('datasetId') == dataset_id
-            )]
-        else:
-            mappings = [m for m in mappings if m['userEmail'].lower() != user_email.lower()]
-
-        save_rls_config(mappings)
-        return jsonify({'success': True, 'message': 'Mapping deleted successfully'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/admin/save_report_access', methods=['POST'])
 @admin_required
