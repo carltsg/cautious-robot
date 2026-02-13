@@ -293,6 +293,9 @@ def view_report(report_id):
             user_email = session['user']['email']
             roles = get_user_roles(user_email, dataset_id)
 
+            # DEBUG: Print what we're sending
+            print(f"DEBUG RLS - Email: {user_email}, Roles: {roles}, Dataset: {dataset_id}")
+
             embed_payload['identities'] = [{
                 'username': user_email,
                 'roles': roles,
