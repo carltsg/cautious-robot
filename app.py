@@ -13,6 +13,25 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
+# Initialize database connection
+from models import init_db
+db_engine, DBSession = init_db()
+if DBSession:
+    print("✓ Database connected (SQL mode)")
+    import models
+    models.db_engine = db_engine
+    models.DBSession = DBSession
+else:
+    print("⚠ Database not configured - using JSON files")
+
+# Import database helpers
+from db_helpers import (
+    load_rls_config,
+    save_rls_config,
+    load_reports_access_config,
+    save_reports_access_config
+)
+
 # Load configuration
 TENANT_ID = os.getenv('TENANT_ID')
 CLIENT_ID = os.getenv('CLIENT_ID')
@@ -20,7 +39,8 @@ CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 WORKSPACE_ID = os.getenv('WORKSPACE_ID')
 ADMIN_EMAILS = os.getenv('ADMIN_EMAILS', '').split(',')
 AUTHORITY = f'https://login.microsoftonline.com/{TENANT_ID}'
-REDIRECT_URI = 'http://localhost:5000/callback'
+# Support both local and Azure environments
+REDIRECT_URI = os.getenv('REDIRECT_URI', 'http://localhost:5000/callback')
 SCOPE = ['https://analysis.windows.net/powerbi/api/.default']
 
 # MSAL Client
@@ -37,17 +57,17 @@ def get_powerbi_token():
     else:
         raise Exception(f"Failed to acquire token: {result.get('error_description')}")
 
-def load_rls_config():
-    """Load RLS configuration from JSON file"""
-    if not os.path.exists('rls-config.json'):
-        return []
-    with open('rls-config.json', 'r') as f:
-        return json.load(f)
+def get_user_reports(user_email):
+    """Get list of report IDs assigned to a user
 
-def save_rls_config(config):
-    """Save RLS configuration to JSON file"""
-    with open('rls-config.json', 'w') as f:
-        json.dump(config, f, indent=2)
+    Returns:
+        list: Report IDs the user has access to, or empty list if no access
+    """
+    config = load_reports_access_config()
+    for mapping in config:
+        if mapping['userEmail'].lower() == user_email.lower():
+            return mapping['reportIds']
+    return []
 
 def get_user_roles(user_email, dataset_id):
     """Get RLS roles for a user
@@ -112,6 +132,16 @@ def index():
 
 @app.route('/login')
 def login():
+    # If user is already authenticated, redirect to home
+    if 'user' in session:
+        return redirect(url_for('index'))
+
+    # Otherwise, render the login page
+    return render_template('login.html')
+
+@app.route('/auth/microsoft')
+def auth_microsoft():
+    """Initiate Microsoft OAuth authentication flow"""
     auth_url = msal_app.get_authorization_request_url(
         scopes=['User.Read'],
         redirect_uri=REDIRECT_URI
@@ -121,8 +151,17 @@ def login():
 @app.route('/callback')
 def callback():
     code = request.args.get('code')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description')
+
+    # Handle OAuth errors
+    if error:
+        session['login_error'] = error_description or 'Authentication failed. Please try again.'
+        return redirect(url_for('login'))
+
     if not code:
-        return 'No authorization code received', 400
+        session['login_error'] = 'No authorization code received from Microsoft.'
+        return redirect(url_for('login'))
 
     result = msal_app.acquire_token_by_authorization_code(
         code, scopes=['User.Read'], redirect_uri=REDIRECT_URI
@@ -144,9 +183,11 @@ def callback():
             }
             return redirect(url_for('index'))
         else:
-            return f'Failed to get user info: {user_info_response.text}', 400
+            session['login_error'] = 'Failed to get user info from Microsoft Graph.'
+            return redirect(url_for('login'))
 
-    return f'Login failed: {result.get("error_description", "Unknown error")}', 400
+    session['login_error'] = result.get('error_description', 'Unknown authentication error')
+    return redirect(url_for('login'))
 
 @app.route('/logout')
 def logout():
@@ -171,6 +212,42 @@ def reports():
             return render_template('reports.html', reports=reports, user=session['user'], is_admin=is_admin())
         else:
             return f'Error fetching reports: {response.text}', 500
+    except Exception as e:
+        return f'Error: {str(e)}', 500
+
+@app.route('/my-reports')
+@login_required
+def my_reports():
+    """List Power BI reports assigned to current user"""
+    try:
+        # Get user's assigned report IDs
+        user_email = session['user']['email']
+        allowed_report_ids = get_user_reports(user_email)
+
+        # Fetch all reports from Power BI API
+        token = get_powerbi_token()
+        headers = {'Authorization': f'Bearer {token}'}
+
+        response = requests.get(
+            f'https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE_ID}/reports',
+            headers=headers
+        )
+
+        if response.status_code != 200:
+            return f'Error fetching reports: {response.text}', 500
+
+        all_reports = response.json().get('value', [])
+
+        # Filter reports based on user access
+        user_reports = [
+            report for report in all_reports
+            if report['id'] in allowed_report_ids
+        ]
+
+        return render_template('my_reports.html',
+                             reports=user_reports,
+                             user=session['user'],
+                             is_admin=is_admin())
     except Exception as e:
         return f'Error: {str(e)}', 500
 
@@ -279,10 +356,12 @@ def admin():
                     dataset_roles[dataset_id] = []
 
         # Load current mappings
-        mappings = load_rls_config()
+        rls_mappings = load_rls_config()
+        report_access_mappings = load_reports_access_config()
 
         return render_template('admin.html',
-                             mappings=mappings,
+                             rls_mappings=rls_mappings,
+                             report_access_mappings=report_access_mappings,
                              reports=reports,
                              dataset_roles=dataset_roles,
                              user=session['user'],
@@ -339,6 +418,47 @@ def delete_mapping():
 
         save_rls_config(mappings)
         return jsonify({'success': True, 'message': 'Mapping deleted successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/save_report_access', methods=['POST'])
+@admin_required
+def save_report_access():
+    """Save user-to-reports access mapping"""
+    try:
+        data = request.json
+        mappings = load_reports_access_config()
+
+        # Remove existing mapping for this user
+        mappings = [m for m in mappings if m['userEmail'].lower() != data['userEmail'].lower()]
+
+        # Add new mapping
+        new_mapping = {
+            'userEmail': data['userEmail'],
+            'reportIds': data['reportIds'],
+            'createdAt': datetime.utcnow().isoformat(),
+            'createdBy': session['user']['email']
+        }
+        mappings.append(new_mapping)
+
+        save_reports_access_config(mappings)
+        return jsonify({'success': True, 'message': 'Report access saved successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/delete_report_access', methods=['POST'])
+@admin_required
+def delete_report_access():
+    """Delete user-to-reports access mapping"""
+    try:
+        user_email = request.json['userEmail']
+        mappings = load_reports_access_config()
+
+        # Remove matching mapping
+        mappings = [m for m in mappings if m['userEmail'].lower() != user_email.lower()]
+
+        save_reports_access_config(mappings)
+        return jsonify({'success': True, 'message': 'Report access deleted successfully'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

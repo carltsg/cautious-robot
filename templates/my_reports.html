@@ -1,0 +1,41 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1 class="mb-4">My Assigned Reports</h1>
+
+<div class="alert alert-info mb-4">
+    <strong>Note:</strong> This page shows only reports that have been assigned to you by an administrator.
+    If you don't see a report you need, please contact your admin.
+</div>
+
+{% if reports %}
+<div class="row">
+    {% for report in reports %}
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">{{ report.name }}</h5>
+                <p class="card-text text-muted small">Report ID: {{ report.id }}</p>
+                <p class="card-text text-muted small">Dataset ID: {{ report.datasetId }}</p>
+            </div>
+            <div class="card-footer bg-white">
+                <a href="/report/{{ report.id }}" class="btn btn-primary w-100">View Report</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-warning">
+    <h4 class="alert-heading">No reports assigned</h4>
+    <p>You don't have access to any reports yet.</p>
+    <hr>
+    <p class="mb-0">
+        {% if is_admin %}
+        As an admin, you can <a href="/admin" class="alert-link">configure report access</a> for users.
+        {% else %}
+        Please contact your administrator to request access to reports.
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+{% endblock %}

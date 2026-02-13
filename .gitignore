@@ -1,8 +1,10 @@
 # Environment variables (contains secrets!)
 .env
 
-# RLS configuration (may contain user data)
+# Configuration files (may contain user data)
 rls-config.json
+reports-access.json
+*.json
 
 # Python
 __pycache__/
@@ -47,6 +49,11 @@ instance/
 
 # Logs
 *.log
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
 
 # Azure
 .azure/
