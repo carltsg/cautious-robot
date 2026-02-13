@@ -262,7 +262,7 @@ def my_reports():
 @app.route('/report/<report_id>')
 @login_required
 def view_report(report_id):
-    """View embedded report with RLS"""
+    """View embedded report with RLS using smart fallback strategy"""
     try:
         token = get_powerbi_token()
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
@@ -278,76 +278,62 @@ def view_report(report_id):
 
         report = report_response.json()
         dataset_id = report['datasetId']
+        user_email = session['user']['email']
 
-        # Check if dataset has RLS roles defined
-        roles_response = requests.get(
-            f'https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE_ID}/datasets/{dataset_id}/roles',
-            headers=headers
-        )
+        logger.info(f"RLS Fallback - Generating embed token for dataset {dataset_id}, user {user_email}")
 
-        dataset_has_rls = False
-        dataset_roles = []
-
-        logger.info(f"RLS Detection - Checking dataset {dataset_id}")
-        logger.info(f"RLS Detection - Roles API response status: {roles_response.status_code}")
-
-        if roles_response.status_code == 200:
-            dataset_roles = roles_response.json().get('value', [])
-            dataset_has_rls = len(dataset_roles) > 0
-            role_names = [r.get('name') for r in dataset_roles]
-            logger.info(f"RLS Detection - Dataset roles found: {role_names}")
-            logger.info(f"RLS Detection - Has RLS: {dataset_has_rls}")
-        elif roles_response.status_code == 404:
-            # 404 means no roles endpoint = no RLS
-            logger.info(f"RLS Detection - No roles endpoint (404) = No RLS")
-            dataset_has_rls = False
-        else:
-            # For other errors, log but assume no RLS to avoid breaking non-RLS reports
-            logger.warning(f"RLS Detection - Failed to get roles (status {roles_response.status_code}): {roles_response.text}")
-            logger.info(f"RLS Detection - Assuming NO RLS (safer for non-RLS reports)")
-            dataset_has_rls = False
-
-        # Build embed token payload
+        # Build embed token payload WITHOUT identity (try this first)
         embed_payload = {
             'datasets': [{'id': dataset_id}],
             'reports': [{'id': report_id}]
         }
 
-        # Only include identities if dataset has RLS roles defined
-        if dataset_has_rls:
-            user_email = session['user']['email']
-            roles = get_user_roles(user_email, dataset_id)
-
-            logger.info(f"RLS Identity - Sending identity: Email={user_email}, Roles={roles}, Dataset={dataset_id}")
-
-            embed_payload['identities'] = [{
-                'username': user_email,
-                'roles': roles,
-                'datasets': [dataset_id]
-            }]
-        else:
-            logger.info(f"RLS Identity - No RLS detected, NOT sending identity")
-
+        logger.info(f"RLS Fallback - Attempt 1: Trying WITHOUT identity")
         token_response = requests.post(
             'https://api.powerbi.com/v1.0/myorg/GenerateToken',
             headers=headers,
             json=embed_payload
         )
 
+        # Check if it failed due to RLS requirement
+        rls_enabled = False
         if token_response.status_code != 200:
-            error_details = {
-                'status_code': token_response.status_code,
-                'dataset_id': dataset_id,
-                'report_id': report_id,
-                'has_rls_detected': dataset_has_rls,
-                'roles_api_status': roles_response.status_code,
-                'identity_sent': dataset_has_rls,
-                'user_email': session['user']['email'] if dataset_has_rls else 'N/A',
-                'roles': get_user_roles(session['user']['email'], dataset_id) if dataset_has_rls else 'N/A',
-                'error_message': token_response.text
-            }
-            logger.error(f"Embed token generation failed: {json.dumps(error_details, indent=2)}")
-            return f'Error generating embed token: {json.dumps(error_details, indent=2)}', 500
+            error_text = token_response.text.lower()
+            requires_identity = 'requires effective identity' in error_text
+
+            if requires_identity:
+                # Dataset has RLS - retry WITH identity
+                logger.info(f"RLS Fallback - Attempt 1 failed: Power BI requires identity (RLS detected)")
+                roles = get_user_roles(user_email, dataset_id)
+
+                logger.info(f"RLS Fallback - Attempt 2: Retrying WITH identity - Email={user_email}, Roles={roles}")
+
+                embed_payload['identities'] = [{
+                    'username': user_email,
+                    'roles': roles,
+                    'datasets': [dataset_id]
+                }]
+
+                token_response = requests.post(
+                    'https://api.powerbi.com/v1.0/myorg/GenerateToken',
+                    headers=headers,
+                    json=embed_payload
+                )
+
+                rls_enabled = True
+
+                if token_response.status_code != 200:
+                    logger.error(f"RLS Fallback - Attempt 2 FAILED: {token_response.text}")
+                    return f'Error generating embed token with RLS: {token_response.text}', 500
+                else:
+                    logger.info(f"RLS Fallback - Attempt 2 SUCCESS: Token generated with identity")
+            else:
+                # Failed for a different reason
+                logger.error(f"RLS Fallback - Attempt 1 failed for non-RLS reason: {token_response.text}")
+                return f'Error generating embed token: {token_response.text}', 500
+        else:
+            # Success without identity - no RLS on this dataset
+            logger.info(f"RLS Fallback - Attempt 1 SUCCESS: Token generated without identity (no RLS)")
 
         embed_token = token_response.json()['token']
 
@@ -358,8 +344,9 @@ def view_report(report_id):
                              embed_token=embed_token,
                              user=session['user'],
                              is_admin=is_admin(),
-                             rls_enabled=dataset_has_rls)
+                             rls_enabled=rls_enabled)
     except Exception as e:
+        logger.error(f"Exception in view_report: {str(e)}")
         return f'Error: {str(e)}', 500
 
 @app.route('/admin')
