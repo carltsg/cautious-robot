@@ -6,6 +6,17 @@ import os
 from datetime import datetime
 from functools import wraps
 from dotenv import load_dotenv
+import logging
+import sys
+
+# Configure logging to stdout for Azure
+logging.basicConfig(
+    stream=sys.stdout,
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -17,12 +28,12 @@ app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 from models import init_db
 db_engine, DBSession = init_db()
 if DBSession:
-    print("✓ Database connected (SQL mode)")
+    logger.info("✓ Database connected (SQL mode)")
     import models
     models.db_engine = db_engine
     models.DBSession = DBSession
 else:
-    print("⚠ Database not configured - using JSON files")
+    logger.info("⚠ Database not configured - using JSON files")
 
 # Import database helpers
 from db_helpers import (
@@ -114,10 +125,7 @@ def admin_required(f):
         admin_list = [email.strip().lower() for email in ADMIN_EMAILS]
 
         # Debug logging
-        print(f"DEBUG - Admin check:")
-        print(f"  Logged in as: '{user_email}' (lowercase: '{user_email.lower()}')")
-        print(f"  Admin list: {admin_list}")
-        print(f"  Match: {user_email.lower() in admin_list}")
+        logger.debug(f"Admin check: user='{user_email.lower()}', admins={admin_list}, match={user_email.lower() in admin_list}")
 
         if user_email.lower() not in admin_list:
             return f'Unauthorized - Admin access required<br><br>Your email: <code>{user_email}</code><br>Admin emails: <code>{admin_list}</code><br><br>Update ADMIN_EMAILS in .env file and restart the app.', 403
@@ -280,22 +288,23 @@ def view_report(report_id):
         dataset_has_rls = False
         dataset_roles = []
 
-        print(f"DEBUG - Checking RLS for dataset {dataset_id}")
-        print(f"DEBUG - Roles API response status: {roles_response.status_code}")
+        logger.info(f"RLS Detection - Checking dataset {dataset_id}")
+        logger.info(f"RLS Detection - Roles API response status: {roles_response.status_code}")
 
         if roles_response.status_code == 200:
             dataset_roles = roles_response.json().get('value', [])
             dataset_has_rls = len(dataset_roles) > 0
-            print(f"DEBUG - Dataset roles found: {[r.get('name') for r in dataset_roles]}")
-            print(f"DEBUG - Has RLS: {dataset_has_rls}")
+            role_names = [r.get('name') for r in dataset_roles]
+            logger.info(f"RLS Detection - Dataset roles found: {role_names}")
+            logger.info(f"RLS Detection - Has RLS: {dataset_has_rls}")
         elif roles_response.status_code == 404:
             # 404 means no roles endpoint = no RLS
-            print(f"DEBUG - No roles endpoint (404) = No RLS")
+            logger.info(f"RLS Detection - No roles endpoint (404) = No RLS")
             dataset_has_rls = False
         else:
             # For other errors, log but assume no RLS to avoid breaking non-RLS reports
-            print(f"DEBUG - Failed to get roles ({roles_response.status_code}): {roles_response.text}")
-            print(f"DEBUG - Assuming NO RLS (safer for non-RLS reports)")
+            logger.warning(f"RLS Detection - Failed to get roles (status {roles_response.status_code}): {roles_response.text}")
+            logger.info(f"RLS Detection - Assuming NO RLS (safer for non-RLS reports)")
             dataset_has_rls = False
 
         # Build embed token payload
@@ -309,8 +318,7 @@ def view_report(report_id):
             user_email = session['user']['email']
             roles = get_user_roles(user_email, dataset_id)
 
-            # DEBUG: Print what we're sending
-            print(f"DEBUG RLS - Sending identity: Email={user_email}, Roles={roles}, Dataset={dataset_id}")
+            logger.info(f"RLS Identity - Sending identity: Email={user_email}, Roles={roles}, Dataset={dataset_id}")
 
             embed_payload['identities'] = [{
                 'username': user_email,
@@ -318,7 +326,7 @@ def view_report(report_id):
                 'datasets': [dataset_id]
             }]
         else:
-            print(f"DEBUG RLS - No RLS detected, not sending identity")
+            logger.info(f"RLS Identity - No RLS detected, NOT sending identity")
 
         token_response = requests.post(
             'https://api.powerbi.com/v1.0/myorg/GenerateToken',
@@ -327,7 +335,19 @@ def view_report(report_id):
         )
 
         if token_response.status_code != 200:
-            return f'Error generating embed token: {token_response.text}', 500
+            error_details = {
+                'status_code': token_response.status_code,
+                'dataset_id': dataset_id,
+                'report_id': report_id,
+                'has_rls_detected': dataset_has_rls,
+                'roles_api_status': roles_response.status_code,
+                'identity_sent': dataset_has_rls,
+                'user_email': session['user']['email'] if dataset_has_rls else 'N/A',
+                'roles': get_user_roles(session['user']['email'], dataset_id) if dataset_has_rls else 'N/A',
+                'error_message': token_response.text
+            }
+            logger.error(f"Embed token generation failed: {json.dumps(error_details, indent=2)}")
+            return f'Error generating embed token: {json.dumps(error_details, indent=2)}', 500
 
         embed_token = token_response.json()['token']
 
@@ -489,11 +509,11 @@ if __name__ == '__main__':
     missing_vars = [var for var in required_vars if not os.getenv(var)]
 
     if missing_vars:
-        print(f"ERROR: Missing required environment variables: {', '.join(missing_vars)}")
-        print("Please create a .env file based on .env.example and fill in the values.")
+        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        logger.error("Please create a .env file based on .env.example and fill in the values.")
         exit(1)
 
-    print("Starting Power BI Embedded POC...")
-    print(f"Admin emails: {ADMIN_EMAILS}")
-    print("Navigate to http://localhost:5000")
+    logger.info("Starting Power BI Embedded POC...")
+    logger.info(f"Admin emails: {ADMIN_EMAILS}")
+    logger.info("Navigate to http://localhost:5000")
     app.run(debug=True, port=5000)
