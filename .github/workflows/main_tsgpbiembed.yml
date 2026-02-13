@@ -22,7 +22,7 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.11'
 
       # 🛠️ Local Build Section (Optional) - REMOVED
       # Commented out because pyodbc requires ODBC drivers that aren't available in GitHub Actions.
