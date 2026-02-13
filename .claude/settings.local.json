@@ -12,7 +12,10 @@
       "Bash(if [ -f .env ])",
       "Bash(then grep \"ADMIN_EMAILS\" .env)",
       "Bash(else echo \".env file not found\")",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(git pull:*)"
     ]
   }
 }
