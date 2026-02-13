@@ -278,16 +278,25 @@ def view_report(report_id):
         )
 
         dataset_has_rls = False
+        dataset_roles = []
+
+        print(f"DEBUG - Checking RLS for dataset {dataset_id}")
         print(f"DEBUG - Roles API response status: {roles_response.status_code}")
+
         if roles_response.status_code == 200:
             dataset_roles = roles_response.json().get('value', [])
             dataset_has_rls = len(dataset_roles) > 0
-            print(f"DEBUG - Dataset roles found: {dataset_roles}")
+            print(f"DEBUG - Dataset roles found: {[r.get('name') for r in dataset_roles]}")
+            print(f"DEBUG - Has RLS: {dataset_has_rls}")
+        elif roles_response.status_code == 404:
+            # 404 means no roles endpoint = no RLS
+            print(f"DEBUG - No roles endpoint (404) = No RLS")
+            dataset_has_rls = False
         else:
-            print(f"DEBUG - Failed to get roles: {roles_response.text}")
-            # If we can't check roles, assume RLS exists to be safe
-            dataset_has_rls = True
-            print(f"DEBUG - Assuming RLS exists for safety")
+            # For other errors, log but assume no RLS to avoid breaking non-RLS reports
+            print(f"DEBUG - Failed to get roles ({roles_response.status_code}): {roles_response.text}")
+            print(f"DEBUG - Assuming NO RLS (safer for non-RLS reports)")
+            dataset_has_rls = False
 
         # Build embed token payload
         embed_payload = {
@@ -295,19 +304,21 @@ def view_report(report_id):
             'reports': [{'id': report_id}]
         }
 
-        # ALWAYS include identity for Service Principal embedding
-        # Power BI will use it if dataset has RLS, ignore if not
-        user_email = session['user']['email']
-        roles = get_user_roles(user_email, dataset_id)
+        # Only include identities if dataset has RLS roles defined
+        if dataset_has_rls:
+            user_email = session['user']['email']
+            roles = get_user_roles(user_email, dataset_id)
 
-        # DEBUG: Print what we're sending
-        print(f"DEBUG RLS - Email: {user_email}, Roles: {roles}, Dataset: {dataset_id}, Has RLS: {dataset_has_rls}")
+            # DEBUG: Print what we're sending
+            print(f"DEBUG RLS - Sending identity: Email={user_email}, Roles={roles}, Dataset={dataset_id}")
 
-        embed_payload['identities'] = [{
-            'username': user_email,
-            'roles': roles,
-            'datasets': [dataset_id]
-        }]
+            embed_payload['identities'] = [{
+                'username': user_email,
+                'roles': roles,
+                'datasets': [dataset_id]
+            }]
+        else:
+            print(f"DEBUG RLS - No RLS detected, not sending identity")
 
         token_response = requests.post(
             'https://api.powerbi.com/v1.0/myorg/GenerateToken',
