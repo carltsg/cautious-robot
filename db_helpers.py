@@ -2,25 +2,23 @@
 import json
 import os
 import logging
-from models import DBSession, RLSMapping, ReportAccess, UserActivity, AdminUser
+import models
+from models import RLSMapping, ReportAccess, UserActivity, AdminUser
 
 # Get logger
 logger = logging.getLogger(__name__)
-
-# Feature flag: Use SQL if available, otherwise fallback to JSON
-USE_SQL = DBSession is not None
 
 # ==================== RLS Configuration ====================
 
 def load_rls_config():
     """Load RLS configuration from SQL or JSON"""
-    if USE_SQL:
+    if models.DBSession is not None:
         return load_rls_config_sql()
     return load_rls_config_json()
 
 def load_rls_config_sql():
     """Load from SQL database with error handling"""
-    session = DBSession()
+    session = models.DBSession()
     try:
         mappings = session.query(RLSMapping).all()
         return [{
@@ -45,14 +43,14 @@ def load_rls_config_json():
 
 def save_rls_config(config):
     """Save RLS configuration to SQL or JSON"""
-    if USE_SQL:
+    if models.DBSession is not None:
         save_rls_config_sql(config)
     else:
         save_rls_config_json(config)
 
 def save_rls_config_sql(config):
     """Save to SQL database with error handling"""
-    session = DBSession()
+    session = models.DBSession()
     try:
         for mapping in config:
             mapping_id = f"{mapping['userEmail']}_{mapping['datasetId']}"
@@ -88,13 +86,13 @@ def save_rls_config_json(config):
 
 def load_reports_access_config():
     """Load report access configuration from SQL or JSON"""
-    if USE_SQL:
+    if models.DBSession is not None:
         return load_reports_access_config_sql()
     return load_reports_access_config_json()
 
 def load_reports_access_config_sql():
     """Load from SQL database with error handling"""
-    session = DBSession()
+    session = models.DBSession()
     try:
         mappings = session.query(ReportAccess).all()
         return [{
@@ -118,14 +116,14 @@ def load_reports_access_config_json():
 
 def save_reports_access_config(config):
     """Save report access configuration to SQL or JSON"""
-    if USE_SQL:
+    if models.DBSession is not None:
         save_reports_access_config_sql(config)
     else:
         save_reports_access_config_json(config)
 
 def save_reports_access_config_sql(config):
     """Save to SQL database with error handling"""
-    session = DBSession()
+    session = models.DBSession()
     try:
         # Clear existing mappings for updated users
         for mapping in config:
@@ -170,10 +168,10 @@ def log_user_activity(activity_type, user_email, user_name=None, report_id=None,
         report_name: Report name (for view_report)
         request: Flask request object (for IP/user agent)
     """
-    if not USE_SQL:
+    if models.DBSession is None:
         return  # Skip if no database
 
-    session = DBSession()
+    session = models.DBSession()
     try:
         import uuid
         activity = UserActivity(
@@ -196,10 +194,10 @@ def log_user_activity(activity_type, user_email, user_name=None, report_id=None,
 
 def get_recent_users(limit=50):
     """Get list of recent users for admin dropdown"""
-    if not USE_SQL:
+    if models.DBSession is None:
         return []
 
-    session = DBSession()
+    session = models.DBSession()
     try:
         # Get distinct users ordered by most recent activity
         from sqlalchemy import func, desc
@@ -227,10 +225,10 @@ def get_recent_users(limit=50):
 
 def get_user_activity_stats(user_email=None, days=30):
     """Get activity statistics for user or all users"""
-    if not USE_SQL:
+    if models.DBSession is None:
         return []
 
-    session = DBSession()
+    session = models.DBSession()
     try:
         from sqlalchemy import func
         from datetime import datetime, timedelta
@@ -268,10 +266,10 @@ def get_user_activity_stats(user_email=None, days=30):
 
 def get_total_logins(days=30):
     """Get total login count for the last N days"""
-    if not USE_SQL:
+    if models.DBSession is None:
         return 0
 
-    session = DBSession()
+    session = models.DBSession()
     try:
         from sqlalchemy import func
         from datetime import datetime, timedelta
@@ -294,8 +292,8 @@ def get_total_logins(days=30):
 def is_user_admin(user_email):
     """Check if user is an admin (database + fallback to env var)"""
     # Check database first
-    if USE_SQL:
-        session = DBSession()
+    if models.DBSession is not None:
+        session = models.DBSession()
         try:
             admin = session.query(AdminUser).filter_by(email=user_email.lower()).first()
             if admin:
@@ -312,10 +310,10 @@ def is_user_admin(user_email):
 
 def get_all_admins():
     """Get list of all admin users"""
-    if not USE_SQL:
+    if models.DBSession is None:
         return []
 
-    session = DBSession()
+    session = models.DBSession()
     try:
         admins = session.query(AdminUser).order_by(AdminUser.email).all()
         return [{
@@ -333,10 +331,10 @@ def get_all_admins():
 
 def add_admin_user(email, name=None, created_by='system', is_super_admin=False):
     """Add a new admin user"""
-    if not USE_SQL:
+    if models.DBSession is None:
         return False
 
-    session = DBSession()
+    session = models.DBSession()
     try:
         existing = session.query(AdminUser).filter_by(email=email.lower()).first()
         if existing:
@@ -360,10 +358,10 @@ def add_admin_user(email, name=None, created_by='system', is_super_admin=False):
 
 def remove_admin_user(email):
     """Remove an admin user"""
-    if not USE_SQL:
+    if models.DBSession is None:
         return False
 
-    session = DBSession()
+    session = models.DBSession()
     try:
         admin = session.query(AdminUser).filter_by(email=email.lower()).first()
         if not admin:
