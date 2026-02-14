@@ -72,23 +72,36 @@ def get_database_url():
 
 def init_db():
     """Initialize database connection and create tables with connection pooling"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     db_url = get_database_url()
     if not db_url:
+        logger.info("No database connection string configured")
         return None, None
 
-    # Configure connection pool for Azure SQL
-    engine = create_engine(
-        db_url,
-        echo=False,
-        pool_pre_ping=True,        # Test connection before using (fixes stale connections)
-        pool_recycle=1800,         # Recycle connections after 30min (before Azure timeout)
-        pool_size=5,               # Keep 5 connections in pool (small, cost-effective)
-        max_overflow=10            # Allow 10 overflow connections
-    )
+    try:
+        # Configure connection pool for Azure SQL
+        engine = create_engine(
+            db_url,
+            echo=False,
+            pool_pre_ping=True,        # Test connection before using (fixes stale connections)
+            pool_recycle=1800,         # Recycle connections after 30min (before Azure timeout)
+            pool_size=5,               # Keep 5 connections in pool (small, cost-effective)
+            max_overflow=10,           # Allow 10 overflow connections
+            connect_args={
+                'timeout': 10          # 10 second timeout (with Basic tier, should connect in <1 sec)
+            }
+        )
 
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    return engine, Session
+        # Test connection and create tables
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        return engine, Session
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}")
+        logger.warning("App will start in JSON file mode (database features disabled)")
+        return None, None
 
 # Global session maker (initialized in app.py)
 db_engine, DBSession = None, None
