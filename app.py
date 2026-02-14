@@ -34,19 +34,25 @@ if DBSession:
     models.DBSession = DBSession
 
     # Bootstrap admin users from environment variable
-    from db_helpers import add_admin_user
-    admin_emails_env = os.getenv('ADMIN_EMAILS', '')
-    if admin_emails_env:
-        for email in admin_emails_env.split(','):
-            email = email.strip()
-            if email:
-                result = add_admin_user(
-                    email=email,
-                    created_by='system_bootstrap',
-                    is_super_admin=True  # First admins are super admins
-                )
-                if result:
-                    logger.info(f"✓ Bootstrapped admin user: {email}")
+    try:
+        from db_helpers import add_admin_user
+        admin_emails_env = os.getenv('ADMIN_EMAILS', '')
+        if admin_emails_env:
+            for email in admin_emails_env.split(','):
+                email = email.strip()
+                if email:
+                    try:
+                        result = add_admin_user(
+                            email=email,
+                            created_by='system_bootstrap',
+                            is_super_admin=True  # First admins are super admins
+                        )
+                        if result:
+                            logger.info(f"✓ Bootstrapped admin user: {email}")
+                    except Exception as e:
+                        logger.warning(f"⚠ Failed to bootstrap admin {email}: {e}")
+    except Exception as e:
+        logger.error(f"⚠ Admin bootstrap failed (non-fatal): {e}")
 else:
     logger.info("⚠ Database not configured - using JSON files")
 

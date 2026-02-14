@@ -79,4 +79,7 @@ jobs:
         with:
           app-name: 'tsgpbiembed'
           slot-name: 'Production'
-          
+          package: .
+        env:
+          ENABLE_ORYX_BUILD: true
+          SCM_DO_BUILD_DURING_DEPLOYMENT: true
