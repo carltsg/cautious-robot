@@ -12,8 +12,20 @@
                 <form id="reportAccessForm">
                     <div class="mb-3">
                         <label for="accessUserEmail" class="form-label">User Email:</label>
-                        <input type="email" id="accessUserEmail" class="form-control" required
-                               placeholder="user@domain.com">
+                        <select id="accessUserEmail" class="form-control" required>
+                            <option value="">-- Select a user --</option>
+                            {% for user in recent_users %}
+                            <option value="{{ user.email }}">
+                                {{ user.name }} ({{ user.email }})
+                                {% if user.last_active %}
+                                - Last active: {{ user.last_active[:10] }}
+                                {% endif %}
+                            </option>
+                            {% endfor %}
+                            <option value="__custom__">+ Add new user (type email)...</option>
+                        </select>
+                        <input type="email" id="customUserEmail" class="form-control mt-2"
+                               style="display:none;" placeholder="user@domain.com">
                     </div>
                     <div class="mb-3">
                         <label for="reportIds" class="form-label">Reports (hold Ctrl/Cmd to select multiple):</label>
@@ -61,6 +73,130 @@
                     <li>Configure RLS in Power BI Desktop using DAX filters</li>
                 </ul>
             </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-info text-white">
+        <h5 class="mb-0">User Activity (Last 30 Days)</h5>
+    </div>
+    <div class="card-body">
+        {% if activity_stats %}
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <h6>Active Users</h6>
+                <p class="display-6">{{ activity_stats.active_users }}</p>
+            </div>
+            <div class="col-md-4">
+                <h6>Total Logins</h6>
+                <p class="display-6">{{ activity_stats.total_logins }}</p>
+            </div>
+            <div class="col-md-4">
+                <h6>Report Views</h6>
+                <p class="display-6">{{ activity_stats.total_views }}</p>
+            </div>
+        </div>
+
+        {% if activity_stats.top_reports %}
+        <hr>
+        <h6>Most Viewed Reports</h6>
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Report</th>
+                        <th>Views</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stat in activity_stats.top_reports[:5] %}
+                    <tr>
+                        <td>{{ stat.report_name }}</td>
+                        <td><span class="badge bg-primary">{{ stat.view_count }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="alert alert-info">
+            No activity data available yet. Activity tracking will populate as users log in and view reports.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header bg-warning text-dark">
+        <h5 class="mb-0">Manage Admin Users</h5>
+    </div>
+    <div class="card-body">
+        <form id="addAdminForm" class="mb-3">
+            <div class="row">
+                <div class="col-md-4">
+                    <input type="email" id="newAdminEmail" class="form-control"
+                           placeholder="admin@company.com" required>
+                </div>
+                <div class="col-md-4">
+                    <input type="text" id="newAdminName" class="form-control"
+                           placeholder="Admin Name (optional)">
+                </div>
+                <div class="col-md-4">
+                    <button type="submit" class="btn btn-warning w-100">
+                        Add Admin User
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        {% if admin_users %}
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Name</th>
+                        <th>Added By</th>
+                        <th>Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for admin in admin_users %}
+                    <tr>
+                        <td>
+                            {{ admin.email }}
+                            {% if admin.is_super_admin %}
+                            <span class="badge bg-danger">Super Admin</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ admin.name or '-' }}</td>
+                        <td><small>{{ admin.created_by }}</small></td>
+                        <td><small>{{ admin.created_at[:10] if admin.created_at else '-' }}</small></td>
+                        <td>
+                            {% if admin.email != user.email %}
+                            <button onclick="removeAdmin('{{ admin.email }}')"
+                                    class="btn btn-sm btn-danger">Remove</button>
+                            {% else %}
+                            <span class="text-muted small">(You)</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            No admin users in database yet. Add your first admin using the form above.
+        </div>
+        {% endif %}
+
+        <div class="alert alert-info mt-3 mb-0">
+            <strong>Note:</strong> Admin users can also be defined in Azure App Settings (ADMIN_EMAILS).
+            This provides emergency access if the database is unavailable.
         </div>
     </div>
 </div>
@@ -122,11 +258,26 @@
 </div>
 
 <script>
+    // Handle user dropdown toggle
+    document.getElementById('accessUserEmail').addEventListener('change', function() {
+        const customInput = document.getElementById('customUserEmail');
+        if (this.value === '__custom__') {
+            customInput.style.display = 'block';
+            customInput.required = true;
+        } else {
+            customInput.style.display = 'none';
+            customInput.required = false;
+            customInput.value = '';
+        }
+    });
+
     // Handle report access form submission
     document.getElementById('reportAccessForm').addEventListener('submit', async function(e) {
         e.preventDefault();
 
-        const userEmail = document.getElementById('accessUserEmail').value;
+        const dropdown = document.getElementById('accessUserEmail');
+        const customInput = document.getElementById('customUserEmail');
+        const userEmail = dropdown.value === '__custom__' ? customInput.value : dropdown.value;
         const selectedOptions = Array.from(document.getElementById('reportIds').selectedOptions);
         const reportIds = selectedOptions.map(o => o.value);
 
@@ -181,6 +332,62 @@
             } catch (error) {
                 alert('Error: ' + error.message);
             }
+        }
+    }
+
+    // Handle add admin form submission
+    document.getElementById('addAdminForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const email = document.getElementById('newAdminEmail').value;
+        const name = document.getElementById('newAdminName').value;
+
+        try {
+            const response = await fetch('/admin/add_admin', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    email: email,
+                    name: name || null
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert('Admin added successfully!');
+                location.reload();
+            } else {
+                alert('Error: ' + result.error);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+        }
+    });
+
+    // Handle remove admin
+    async function removeAdmin(email) {
+        if (!confirm(`Remove admin access for ${email}?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/admin/remove_admin', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ email: email })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert('Admin removed successfully!');
+                location.reload();
+            } else {
+                alert('Error: ' + result.error);
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
         }
     }
 </script>

@@ -32,6 +32,21 @@ if DBSession:
     import models
     models.db_engine = db_engine
     models.DBSession = DBSession
+
+    # Bootstrap admin users from environment variable
+    from db_helpers import add_admin_user
+    admin_emails_env = os.getenv('ADMIN_EMAILS', '')
+    if admin_emails_env:
+        for email in admin_emails_env.split(','):
+            email = email.strip()
+            if email:
+                result = add_admin_user(
+                    email=email,
+                    created_by='system_bootstrap',
+                    is_super_admin=True  # First admins are super admins
+                )
+                if result:
+                    logger.info(f"✓ Bootstrapped admin user: {email}")
 else:
     logger.info("⚠ Database not configured - using JSON files")
 
@@ -98,12 +113,12 @@ def get_user_roles(user_email, dataset_id):
     return ['Customer']
 
 def is_admin():
-    """Check if current user is an admin"""
+    """Check if current user is an admin (uses database)"""
     if 'user' not in session:
         return False
     user_email = session['user']['email']
-    admin_list = [email.strip().lower() for email in ADMIN_EMAILS]
-    return user_email.lower() in admin_list
+    from db_helpers import is_user_admin
+    return is_user_admin(user_email)
 
 def login_required(f):
     """Decorator to require login"""
@@ -189,6 +204,16 @@ def callback():
                 'name': user_info.get('displayName'),
                 'email': user_info.get('userPrincipalName')
             }
+
+            # Log login activity
+            from db_helpers import log_user_activity
+            log_user_activity(
+                activity_type='login',
+                user_email=session['user']['email'],
+                user_name=session['user']['name'],
+                request=request
+            )
+
             return redirect(url_for('index'))
         else:
             session['login_error'] = 'Failed to get user info from Microsoft Graph.'
@@ -279,6 +304,17 @@ def view_report(report_id):
         report = report_response.json()
         dataset_id = report['datasetId']
         user_email = session['user']['email']
+
+        # Log report view activity
+        from db_helpers import log_user_activity
+        log_user_activity(
+            activity_type='view_report',
+            user_email=user_email,
+            user_name=session['user'].get('name'),
+            report_id=report_id,
+            report_name=report.get('name'),
+            request=request
+        )
 
         logger.info(f"RLS Fallback - Generating embed token for dataset {dataset_id}, user {user_email}")
 
@@ -371,9 +407,33 @@ def admin():
         # Load report access mappings
         report_access_mappings = load_reports_access_config()
 
+        # Get recent users for dropdown
+        from db_helpers import get_recent_users, get_user_activity_stats, get_total_logins, get_all_admins
+        recent_users = get_recent_users(limit=50)
+
+        # Get activity statistics (last 30 days)
+        top_reports = get_user_activity_stats(days=30)
+        total_logins = get_total_logins(days=30)
+
+        # Calculate total views from top_reports
+        total_views = sum(stat['view_count'] for stat in top_reports) if top_reports else 0
+
+        activity_stats = {
+            'active_users': len(recent_users),
+            'total_logins': total_logins,
+            'total_views': total_views,
+            'top_reports': top_reports
+        }
+
+        # Get admin users
+        admin_users = get_all_admins()
+
         return render_template('admin.html',
                              reports=reports,
                              report_access_mappings=report_access_mappings,
+                             recent_users=recent_users,
+                             activity_stats=activity_stats,
+                             admin_users=admin_users,
                              user=session['user'],
                              is_admin=is_admin())
     except Exception as e:
@@ -418,6 +478,54 @@ def delete_report_access():
         save_reports_access_config(mappings)
         return jsonify({'success': True, 'message': 'Report access deleted successfully'})
     except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/add_admin', methods=['POST'])
+@admin_required
+def add_admin():
+    """Add a new admin user"""
+    try:
+        data = request.json
+        from db_helpers import add_admin_user
+
+        success = add_admin_user(
+            email=data['email'],
+            name=data.get('name'),
+            created_by=session['user']['email'],
+            is_super_admin=False
+        )
+
+        if success:
+            logger.info(f"Admin user added: {data['email']} by {session['user']['email']}")
+            return jsonify({'success': True, 'message': 'Admin added successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Admin already exists'}), 400
+    except Exception as e:
+        logger.error(f"Failed to add admin: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/remove_admin', methods=['POST'])
+@admin_required
+def remove_admin():
+    """Remove an admin user"""
+    try:
+        data = request.json
+        user_email = session['user']['email']
+
+        # Prevent removing yourself
+        if data['email'].lower() == user_email.lower():
+            return jsonify({'success': False, 'error': 'Cannot remove yourself'}), 400
+
+        from db_helpers import remove_admin_user
+        success = remove_admin_user(data['email'])
+
+        if success:
+            logger.info(f"Admin user removed: {data['email']} by {user_email}")
+            return jsonify({'success': True, 'message': 'Admin removed successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Admin not found'}), 404
+    except Exception as e:
+        logger.error(f"Failed to remove admin: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
