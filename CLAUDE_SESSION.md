@@ -3,8 +3,9 @@
 **Project:** Power BI Embedded Web Application with RLS
 **Developer:** Carl Hunter (carl.hunter@TSGdemonstration.onmicrosoft.com)
 **Date Started:** 2026-02-11
-**Last Updated:** 2026-02-11
+**Last Updated:** 2026-03-05
 **Repository:** https://github.com/carltsg/cautious-robot
+**Production URL:** https://tsgpbiembed-eqbbewh4bebxh9hk.uksouth-01.azurewebsites.net
 
 ---
 
@@ -27,12 +28,12 @@ Customer wants to share Power BI reports with their external customers (20-100 u
 
 ## Technology Stack
 
-- **Backend:** Python 3.10+ with Flask
+- **Backend:** Python 3.11 with Flask
 - **Authentication:** MSAL (Microsoft Authentication Library)
 - **Power BI:** REST API + powerbi-client JavaScript SDK
 - **Frontend:** Bootstrap 5 + vanilla JavaScript
-- **Storage:** JSON file (designed for easy database migration)
-- **Hosting Target:** Azure Web App
+- **Database:** Azure SQL Database with SQLAlchemy ORM (with JSON fallback)
+- **Hosting:** Azure Web App (Linux, Basic B1 tier)
 
 ### Dependencies (requirements.txt)
 ```
@@ -40,6 +41,10 @@ Flask==3.0.0
 msal==1.26.0
 requests==2.31.0
 python-dotenv==1.0.0
+SQLAlchemy==2.0.25
+pyodbc==5.0.1
+azure-identity==1.15.0
+gunicorn==21.2.0
 ```
 
 ---
@@ -48,22 +53,32 @@ python-dotenv==1.0.0
 
 ```
 pbiembedded/
-├── app.py                          # Main Flask application (~330 lines)
+├── app.py                          # Main Flask application (~550 lines)
+├── models.py                       # SQLAlchemy database models
+├── db_helpers.py                   # Database abstraction layer with JSON fallback
 ├── requirements.txt                # Python dependencies
 ├── .env                           # Configuration (NOT in git)
 ├── .env.example                   # Configuration template
-├── rls-config.json                # User-to-role mappings (auto-created)
+├── rls-config.json                # User-to-role mappings (fallback, auto-created)
+├── reports-access.json            # Report access mappings (fallback, auto-created)
 ├── templates/
 │   ├── layout.html                # Base template with navigation
 │   ├── index.html                 # Home page
-│   ├── reports.html               # Report listing
+│   ├── login.html                 # Login page
+│   ├── reports.html               # Report listing (admin)
+│   ├── my_reports.html            # User's assigned reports
 │   ├── view_report.html           # Embedded report viewer
-│   └── admin.html                 # RLS configuration UI
+│   └── admin.html                 # Full admin panel with user activity stats
 ├── static/
 │   ├── powerbi.js                 # Power BI embed logic
 │   └── style.css                  # Custom CSS
+├── .github/workflows/
+│   └── main_tsgpbiembed.yml       # GitHub Actions CI/CD pipeline
 ├── README.md                      # Complete setup guide
 ├── EXTERNAL_CUSTOMERS_GUIDE.md    # Step-by-step customer setup
+├── AZURE_OPTIMIZATION.md          # Azure performance optimization guide
+├── TECHNICAL_DOCUMENTATION.md     # Technical architecture docs
+├── RLS_FLOW_EXPLAINED.md          # RLS implementation details
 └── CLAUDE_SESSION.md              # This file - session log
 ```
 
@@ -168,6 +183,63 @@ return render_template('index.html', user=session['user'], is_admin=is_admin())
 
 ---
 
+### Issue 5: Azure Deployment & Database Migration
+**Problem:** Needed to migrate from local JSON storage to production-ready database and deploy to Azure.
+
+**Solution:** Implemented database abstraction layer with automatic fallback:
+1. Created SQLAlchemy models for all data (RLS mappings, report access, user activity, admin users)
+2. Built `db_helpers.py` abstraction layer that tries SQL first, falls back to JSON
+3. Added connection pooling with `pool_pre_ping` and `pool_recycle` for Azure SQL
+4. Configured GitHub Actions CI/CD pipeline for automatic deployment
+5. Set up Azure SQL Database (Basic tier) with secure connection string
+
+**Key Features:**
+- Graceful degradation: App works even if database connection fails
+- User activity tracking: Login and report view logging
+- Admin management: Database-driven admin user system
+- Connection pooling: Handles Azure SQL idle timeouts
+
+**Commits:**
+- `b3065d3` - Add database connection error handling for graceful fallback
+- `827c5c3` - Revert yml changes - workflow was fine, issue was timing
+- `07e0a56` - Fix: Ensure Oryx build runs during deployment
+
+---
+
+### Issue 6: Cold Start Performance (60-90 seconds)
+**Problem:** After deploying to Azure, the app experienced severe cold starts. Login page took minutes to load when app was idle.
+
+**Root Cause Analysis:**
+- Virtual environment extraction: ~42 seconds
+- Database connection initialization: ~29 seconds
+- Azure App Service sleeping after idle periods (default on Basic tier)
+
+**Solution:**
+1. Added lightweight `/health` endpoint for monitoring and warming
+2. Created comprehensive optimization guide (AZURE_OPTIMIZATION.md)
+3. Recommended enabling "Always On" in Azure App Service
+4. Configured health check monitoring path
+
+**Health Endpoint:**
+```python
+@app.route('/health')
+def health():
+    """Lightweight health check endpoint for warming up the app"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'database': 'connected' if DBSession else 'json_mode'
+    }), 200
+```
+
+**Expected Performance After Configuration:**
+- Before: 60-90 second first load
+- After: Consistently <5 seconds with "Always On" enabled
+
+**Commit:** `602cd92` - Add health check endpoint and cold start optimization guide
+
+---
+
 ## Current Configuration
 
 ### Environment Variables (.env)
@@ -182,11 +254,21 @@ SECRET_KEY=your-flask-secret-key
 
 ### Azure AD App Registration
 - **Name:** PowerBI-Embedded-POC (or similar)
-- **Redirect URI:** `http://localhost:5000/callback`
+- **Redirect URIs:**
+  - `http://localhost:5000/callback` (local dev)
+  - `https://tsgpbiembed-eqbbewh4bebxh9hk.uksouth-01.azurewebsites.net/callback` (production)
 - **Permissions:** Power BI Service (Report.Read.All, Dataset.Read.All, Workspace.Read.All)
 - **Admin consent:** Granted
 - **Service principal:** Enabled in Power BI tenant settings
 - **Workspace access:** Service principal added as Member/Admin
+
+### Azure Resources
+- **App Service:** tsgpbiembed (Linux, Python 3.11, Basic B1 tier)
+- **App Service Plan:** ASP-tsgpbiembed-8c4b (UK South)
+- **Database:** Azure SQL Database (Basic tier, 2GB)
+- **Resource Group:** tsgpbiembed_group
+- **Deployment:** GitHub Actions CI/CD (automatic on push to main)
+- **Application Settings:** Environment variables configured in Azure Portal
 
 ---
 
@@ -215,43 +297,78 @@ SECRET_KEY=your-flask-secret-key
 5. User sees only their data!
 
 ### Admin Panel Flow
-1. Admin user logs in (email in ADMIN_EMAILS list)
+1. Admin user logs in (email in ADMIN_EMAILS list or admin_users table)
 2. Admin link appears in navigation
 3. Admin can manually assign specific roles to users
 4. These explicit mappings override the default "Customer" role
+5. Admin can view user activity statistics (logins, report views)
+6. Admin can manage other admin users
+
+### Database Schema (Azure SQL)
+**Tables:**
+- `rls_mappings` - User email to RLS roles mappings
+  - id (PK), user_email, dataset_id, roles (JSON), created_at, created_by
+- `report_access` - User email to report IDs mappings
+  - user_email (PK), report_ids (JSON), created_at, created_by
+- `user_activity` - Login and report view tracking
+  - id (PK), user_email, user_name, activity_type, report_id, report_name, timestamp, ip_address, user_agent
+- `admin_users` - Admin user management
+  - email (PK), name, created_at, created_by, is_super_admin
+
+**Connection Pooling:**
+- pool_pre_ping: Tests connections before use
+- pool_recycle: 1800s (recycles before Azure timeout)
+- pool_size: 5 connections
+- max_overflow: 10 connections
+- timeout: 10 seconds
 
 ---
 
 ## Current Status
 
 ### ✅ Working
-- Flask app runs on `http://localhost:5000`
-- Entra ID authentication
+- **Production deployment:** https://tsgpbiembed-eqbbewh4bebxh9hk.uksouth-01.azurewebsites.net
+- Flask app runs locally on `http://localhost:5000` and in Azure
+- Entra ID authentication with Microsoft login
+- Azure SQL Database with graceful JSON fallback
 - Report listing from Power BI workspace
-- Report embedding (with or without RLS)
-- Admin panel accessible at `/admin`
+- Report embedding with smart RLS fallback (works with or without RLS)
+- User activity tracking (logins and report views)
+- Admin panel at `/admin` with:
+  - User-to-report access management
+  - Recent users list (from activity logs)
+  - Activity statistics (logins, views, top reports)
+  - Admin user management
+- `/health` endpoint for monitoring and warming
 - Admin link visible in navigation for admin users
-- Automatic "Customer" role assignment
+- Automatic "Customer" role assignment for RLS
 - Case-insensitive admin email checking
+- GitHub Actions CI/CD pipeline for automatic deployment
+
+### ⏱️ Performance Optimization Needed
+- **Cold starts:** 60-90 seconds when app is idle
+  - **Fix:** Enable "Always On" in Azure App Service settings
+  - **Fix:** Configure Health Check monitoring with path `/health`
+  - See AZURE_OPTIMIZATION.md for detailed instructions
 
 ### ⚠️ Not Yet Configured
 - **Power BI RLS roles** - Dataset doesn't have "Customer" role defined yet
   - App works without RLS (all users see same data)
-  - Shows yellow warning: "This dataset does not have RLS roles defined"
+  - Smart fallback detects when RLS is needed
 - **External customers** - No guest users invited yet
-- **Production deployment** - Still running locally
+- **Always On setting** - Needs to be enabled in Azure to prevent cold starts
 
 ### 📝 To Do Next
-1. **Test report embedding fully** - Verify report loads in iframe
-2. **Configure RLS in Power BI Desktop:**
+1. **Enable Always On** in Azure App Service (fixes cold start issue)
+2. **Configure Health Check** monitoring in Azure
+3. **Configure RLS in Power BI Desktop:**
    - Create CustomerMapping table
    - Create "Customer" role with DAX filter
    - Publish to Power BI Service
-3. **Test RLS filtering:**
+4. **Test RLS filtering:**
    - Add test data to CustomerMapping table
    - Verify users see filtered data
-4. **Invite external customers** as Azure AD B2B guests
-5. **Deploy to Azure Web App** for production
+5. **Invite external customers** as Azure AD B2B guests
 
 ---
 
@@ -290,14 +407,19 @@ SECRET_KEY=your-flask-secret-key
 
 **GitHub:** https://github.com/carltsg/cautious-robot
 
-### Commit History
-1. `a20b1df` - Initial implementation of Power BI Embedded POC with automatic RLS
-2. `6d95b7b` - Update Claude settings to allow git commit commands
-3. `840d6a7` - Update Claude settings to allow git push commands
-4. `ef6c738` - Fix: Only apply RLS when dataset has roles defined
-5. `f15e603` - Add debugging and fix Power BI models undefined error
-6. `0949d2c` - Fix: Make admin email comparison case-insensitive
-7. `69726f0` - Improve admin check and show Admin link in navigation
+### Recent Commit History
+1. `602cd92` - Add health check endpoint and cold start optimization guide
+2. `6e21829` - Delete tsgpbiembed.database.windows.net.txt
+3. `b3065d3` - Add database connection error handling for graceful fallback
+4. `827c5c3` - Revert yml changes - workflow was fine, issue was timing
+5. `07e0a56` - Fix: Ensure Oryx build runs during deployment
+6. `3d75978` - Trigger Azure Oryx build
+7. `030e12c` - Fix: Resolve import timing issue causing app startup failure
+8. ... (earlier commits)
+9. `69726f0` - Improve admin check and show Admin link in navigation
+10. `0949d2c` - Fix: Make admin email comparison case-insensitive
+11. `ef6c738` - Fix: Only apply RLS when dataset has roles defined
+12. `a20b1df` - Initial implementation of Power BI Embedded POC with automatic RLS
 
 ---
 
@@ -375,10 +497,10 @@ python app.py
 
 ### Current Limitations
 1. **No token refresh** - Embed tokens expire after 60 minutes, user must refresh page
-2. **No audit logging** - RLS config changes not logged
-3. **JSON storage** - Not suitable for concurrent access (production needs database)
-4. **No bulk user import** - Admin must add mappings one by one
-5. **Single workspace** - App configured for one workspace only
+2. **Cold start performance** - 60-90 seconds when idle (fix: enable Always On in Azure)
+3. **No bulk user import** - Admin must add user-to-report mappings one by one
+4. **Single workspace** - App configured for one workspace only
+5. **Basic audit logging** - Activity tracked but no detailed change audit trail
 
 ### Security Considerations
 - `.env` file contains secrets (never commit to git)
@@ -482,7 +604,11 @@ Console tab                  # View JavaScript logs
 ### Documentation
 - **README.md** - Complete setup and deployment guide
 - **EXTERNAL_CUSTOMERS_GUIDE.md** - Step-by-step for external customer scenarios
+- **AZURE_OPTIMIZATION.md** - Azure performance optimization and cold start fixes
+- **TECHNICAL_DOCUMENTATION.md** - Technical architecture documentation
+- **RLS_FLOW_EXPLAINED.md** - RLS implementation details
 - **GitHub Repo** - https://github.com/carltsg/cautious-robot
+- **Production URL** - https://tsgpbiembed-eqbbewh4bebxh9hk.uksouth-01.azurewebsites.net
 
 ### Microsoft Documentation
 - [Power BI Embedded](https://learn.microsoft.com/en-us/power-bi/developer/embedded/)
@@ -499,18 +625,42 @@ Console tab                  # View JavaScript logs
 
 ## Session Summary
 
-**Total Development Time:** ~3-4 hours
+### Initial Development (2026-02-11)
+**Development Time:** ~3-4 hours
 **Lines of Code Written:** ~1500 lines (including documentation)
 **Files Created:** 14 files
 **Commits Made:** 7 commits
 **Issues Resolved:** 4 major issues
+**Status:** POC functional locally
 
-**Status:** POC functional, ready for Power BI RLS configuration and testing
+### Production Deployment (2026-02-24 to 2026-03-05)
+**Development Time:** ~4-5 hours
+**Additional Code:** ~800 lines (database layer, models, deployment config)
+**Additional Files:** 3 new files (models.py, db_helpers.py, AZURE_OPTIMIZATION.md)
+**Commits Made:** 8+ commits
+**Issues Resolved:** 2 major issues (Azure deployment, cold start performance)
+**Status:** Deployed to Azure production, database migrated, performance optimization guide created
 
-**Next Session:** Continue with Power BI RLS setup and external customer testing
+### Overall Project
+**Total Development Time:** ~7-9 hours
+**Total Lines of Code:** ~2300 lines (application code + documentation)
+**Total Files:** 17+ files
+**Total Commits:** 15+ commits
+**Issues Resolved:** 6 major issues
+
+**Current Status:**
+- ✅ Production deployed to Azure
+- ✅ Database migrated to Azure SQL
+- ✅ User activity tracking implemented
+- ✅ Health endpoint for monitoring
+- ⏱️ Performance optimization needed (Always On configuration)
+- ⚠️ Ready for Power BI RLS configuration and testing
+
+**Next Steps:** Enable Always On, configure health check, set up Power BI RLS, test with external customers
 
 ---
 
 **End of Session Log**
-*Last updated: 2026-02-11*
+*Last updated: 2026-03-05*
+*Production URL: https://tsgpbiembed-eqbbewh4bebxh9hk.uksouth-01.azurewebsites.net*
 *For questions or continuation, reference this document and the GitHub repository.*
