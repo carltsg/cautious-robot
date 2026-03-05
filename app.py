@@ -233,6 +233,15 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+@app.route('/health')
+def health():
+    """Lightweight health check endpoint for warming up the app"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'database': 'connected' if DBSession else 'json_mode'
+    }), 200
+
 @app.route('/reports')
 @login_required
 def reports():
